@@ -1,0 +1,2546 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PT. Bumi Latimojong — Sistem Absensi & Penggajian Karyawan</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- Font Awesome 6 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <!-- Supabase JS SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#f2f7f4',
+              100: '#dfece4',
+              200: '#c0d9cb',
+              300: '#95bea9',
+              400: '#669d83',
+              500: '#458066',
+              600: '#336550',
+              700: '#2a5141',
+              800: '#234135',
+              900: '#1d362c',
+            },
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f8fafc;
+      color: #0f172a;
+    }
+
+    /* Custom subtle scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    /* Sticky table column for attendance matrix */
+    .sticky-col-name {
+      position: sticky;
+      left: 0;
+      z-index: 10;
+      background-color: #ffffff;
+    }
+    thead .sticky-col-name {
+      background-color: #f8fafc;
+      z-index: 20;
+    }
+
+    /* Print optimization */
+    @media print {
+      @page {
+        size: A4 landscape;
+        margin: 12mm;
+      }
+      body {
+        background: #ffffff !important;
+        color: #000000 !important;
+        font-size: 11px !important;
+      }
+      .no-print {
+        display: none !important;
+      }
+      .print-only {
+        display: block !important;
+      }
+      .print-table-col {
+        display: table-cell !important;
+      }
+      .print-card {
+        box-shadow: none !important;
+        border: 1px solid #cbd5e1 !important;
+        break-inside: avoid;
+        margin-bottom: 20px !important;
+      }
+      .page-break {
+        page-break-before: always;
+      }
+      table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+      }
+      th, td {
+        border: 1px solid #94a3b8 !important;
+        padding: 5px 6px !important;
+        font-size: 10px !important;
+      }
+      th {
+        background-color: #f1f5f9 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 no-print"></div>
+
+  <!-- Top Navigation Header -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 no-print">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between py-3.5 gap-3">
+        <!-- Brand Identity -->
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-brand-700 text-white flex items-center justify-center shadow-sm">
+            <i class="fa-solid fa-mountain-sun text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-base sm:text-lg font-bold text-slate-900 tracking-tight leading-tight">
+              PT. BUMI LATIMOJONG
+            </h1>
+            <p class="text-xs text-slate-500 font-medium">Sistem Absensi & Penggajian Karyawan</p>
+          </div>
+        </div>
+
+        <!-- Global Period Selector & Supabase Controls -->
+        <div class="flex flex-wrap items-center gap-2.5">
+          <div class="flex items-center bg-slate-100 border border-slate-200 rounded-xl px-3 py-1.5">
+            <i class="fa-regular fa-calendar text-brand-700 mr-2 text-sm"></i>
+            <label for="global-period" class="text-xs font-semibold text-slate-600 mr-2">Periode:</label>
+            <input
+              type="month"
+              id="global-period"
+              class="bg-transparent text-sm font-semibold text-slate-900 focus:outline-none cursor-pointer"
+            />
+          </div>
+
+          <div id="cloud-status-badge" class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-amber-50 text-amber-800 border border-amber-200">
+            <i class="fa-solid fa-database animate-pulse"></i>
+            <span>Menghubungkan Supabase...</span>
+          </div>
+
+          <button
+            onclick="openBackupModal()"
+            class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition"
+            title="Pengaturan Supabase & Backup Data"
+          >
+            <i class="fa-solid fa-sliders text-slate-500"></i>
+            <span class="hidden sm:inline">Supabase & Backup</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 4 Main Navigation Tabs -->
+      <nav class="flex space-x-1 overflow-x-auto pb-0 -mb-px" aria-label="Tabs">
+        <button
+          onclick="switchTab('review')"
+          id="tab-btn-review"
+          class="nav-tab group inline-flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap"
+        >
+          <i class="fa-solid fa-clipboard-check"></i>
+          <span>1. Review</span>
+        </button>
+
+        <button
+          onclick="switchTab('salary')"
+          id="tab-btn-salary"
+          class="nav-tab group inline-flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap"
+        >
+          <i class="fa-solid fa-money-check-dollar"></i>
+          <span>2. Salary</span>
+        </button>
+
+        <button
+          onclick="switchTab('workplace')"
+          id="tab-btn-workplace"
+          class="nav-tab group inline-flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap"
+        >
+          <i class="fa-solid fa-users-gear"></i>
+          <span>3. Workplace & Manpower</span>
+        </button>
+
+        <button
+          onclick="switchTab('laporan')"
+          id="tab-btn-laporan"
+          class="nav-tab group inline-flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap"
+        >
+          <i class="fa-solid fa-file-invoice-dollar"></i>
+          <span>4. Laporan</span>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Main Content Area -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- TAB 1: REVIEW (READ-ONLY) -->
+    <section id="view-review" class="tab-view space-y-6"></section>
+
+    <!-- TAB 2: SALARY (READ-ONLY) -->
+    <section id="view-salary" class="tab-view hidden space-y-6"></section>
+
+    <!-- TAB 3: WORKPLACE & MANPOWER (CRUD & ATTENDANCE) -->
+    <section id="view-workplace" class="tab-view hidden space-y-6"></section>
+
+    <!-- TAB 4: LAPORAN (REPORT & PRINT/EXPORT) -->
+    <section id="view-laporan" class="tab-view hidden space-y-6"></section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-white border-t border-slate-200 py-4 mt-10 no-print">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
+      <div>&copy; 2026 <strong>PT. Bumi Latimojong</strong> — HRIS, Attendance & Payroll System</div>
+      <div id="footer-sync-info">Terhubung ke Supabase PostgreSQL (Tanpa Penyimpanan Lokal)</div>
+    </div>
+  </footer>
+
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- Modal 1: Add/Edit Site -->
+  <div id="modal-site" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4 no-print">
+    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-200">
+      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <h3 id="modal-site-title" class="text-base font-bold text-slate-900">Tambah Site Baru</h3>
+        <button onclick="closeModal('modal-site')" class="text-slate-400 hover:text-slate-600 p-1">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <form id="form-site" onsubmit="handleSaveSite(event)" class="p-6 space-y-4">
+        <input type="hidden" id="site-id" />
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Klien <span class="text-red-500">*</span></label>
+          <input type="text" id="site-client" required placeholder="Contoh: PT. Vale Indonesia Tbk" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 focus:border-brand-600 outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Lokasi <span class="text-red-500">*</span></label>
+          <input type="text" id="site-location" required placeholder="Contoh: Bahodopi, Morowali - Sulteng" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 focus:border-brand-600 outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Site <span class="text-red-500">*</span></label>
+          <input type="text" id="site-name" required placeholder="Contoh: Site Morowali - Blok B" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 focus:border-brand-600 outline-none" />
+        </div>
+        <div class="pt-2 flex justify-end gap-2">
+          <button type="button" onclick="closeModal('modal-site')" class="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition">Batal</button>
+          <button type="submit" class="px-4 py-2 text-sm font-semibold text-white bg-brand-700 rounded-xl hover:bg-brand-800 transition">Simpan Site</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 2: Add Custom Position (Jabatan) -->
+  <div id="modal-position" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4 no-print">
+    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-200">
+      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <h3 class="text-base font-bold text-slate-900">Tambah Jabatan Baru</h3>
+        <button onclick="closeModal('modal-position')" class="text-slate-400 hover:text-slate-600 p-1">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <form id="form-position" onsubmit="handleSavePosition(event)" class="p-6 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Jabatan <span class="text-red-500">*</span></label>
+          <input type="text" id="pos-name" required placeholder="Contoh: Surveyor / Grade Control" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 focus:border-brand-600 outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Kategori Penempatan <span class="text-red-500">*</span></label>
+          <select id="pos-category" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none bg-white">
+            <option value="SITE">Site / Lapangan</option>
+            <option value="HO">Head Office (Kantor Pusat)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Urutan Hierarki (Angka lebih kecil = lebih tinggi)</label>
+          <input type="number" id="pos-rank" min="1" max="99" value="16" required class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none" />
+          <p class="text-[11px] text-slate-500 mt-1">Jabatan default menggunakan urutan 1–15 (Site) dan 1–11 (Head Office).</p>
+        </div>
+        <div class="pt-2 flex justify-end gap-2">
+          <button type="button" onclick="closeModal('modal-position')" class="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition">Batal</button>
+          <button type="submit" class="px-4 py-2 text-sm font-semibold text-white bg-brand-700 rounded-xl hover:bg-brand-800 transition">Tambah Jabatan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 3: Add/Edit Manpower -->
+  <div id="modal-manpower" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4 no-print overflow-y-auto">
+    <div class="bg-white rounded-2xl shadow-xl max-w-2xl w-full overflow-hidden border border-slate-200 my-8">
+      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+        <h3 id="modal-mp-title" class="text-base font-bold text-slate-900">Tambah Karyawan (Manpower)</h3>
+        <button onclick="closeModal('modal-manpower')" class="text-slate-400 hover:text-slate-600 p-1">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <form id="form-manpower" onsubmit="handleSaveManpower(event)" class="p-6 space-y-5 max-h-[82vh] overflow-y-auto">
+        <input type="hidden" id="mp-id" />
+
+        <!-- Identitas Pribadi -->
+        <div>
+          <h4 class="text-xs font-bold uppercase tracking-wider text-brand-700 mb-3">1. Data Pribadi & Penempatan</h4>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">NIK / No. KTP <span class="text-red-500">*</span></label>
+              <input type="text" id="mp-nik" required maxlength="20" placeholder="7371xxxxxxxxxxxx" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Lengkap <span class="text-red-500">*</span></label>
+              <input type="text" id="mp-name" required placeholder="Nama sesuai KTP" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Lokasi Kerja Saat Ini <span class="text-red-500">*</span></label>
+              <select id="mp-site" required class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none bg-white"></select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Jabatan <span class="text-red-500">*</span></label>
+              <select id="mp-position" required class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none bg-white"></select>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Alamat Domisili <span class="text-red-500">*</span></label>
+              <input type="text" id="mp-address" required placeholder="Alamat lengkap karyawan" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Status Karyawan <span class="text-red-500">*</span></label>
+              <select id="mp-status" required class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none bg-white">
+                <option value="Aktif">Aktif</option>
+                <option value="Resign">Resign (Keluar)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Metode Pembayaran Default</label>
+              <select id="mp-tx-type" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none bg-white">
+                <option value="Transfer">Transfer Bank</option>
+                <option value="Cash Lokasi">Cash Lokasi</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Skema Gaji -->
+        <div class="pt-2 border-t border-slate-100">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-brand-700 mb-3">2. Skema & Besaran Gaji</h4>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="sm:col-span-2">
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Skema Salary <span class="text-red-500">*</span></label>
+              <select id="mp-salary-type" required onchange="updateSalaryFormUI()" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none bg-white">
+                <option value="HO Salary">1. HO Salary (Full / Bulan — Tidak terpengaruh kehadiran)</option>
+                <option value="Site Salary v.1">2. Site Salary v.1 (Basic Salary / Bulan + Site Allowance / Hari)</option>
+                <option value="Site Salary v.2">3. Site Salary v.2 (Upah Harian × Jumlah Kehadiran)</option>
+              </select>
+            </div>
+
+            <!-- Input Utama: HO Salary / Basic Salary / Upah Harian v.2 -->
+            <div id="mp-salary-primary-group">
+              <label id="mp-salary-primary-label" class="block text-xs font-semibold text-slate-700 mb-1">
+                HO Salary (Full / Bulan) (Rp) <span class="text-red-500">*</span>
+              </label>
+              <input type="number" id="mp-salary-amount" required min="0" step="1000" placeholder="Contoh: 15000000" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none" />
+            </div>
+
+            <!-- Input Kedua (Khusus Site Salary v.1): Site Allowance per Hari -->
+            <div id="mp-salary-allowance-group" class="hidden">
+              <label class="block text-xs font-semibold text-slate-700 mb-1">
+                Site Allowance (Upah Harian Lokasi / Hari) (Rp) <span class="text-red-500">*</span>
+              </label>
+              <input type="number" id="mp-salary-allowance" min="0" step="1000" placeholder="Contoh: 150000" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none" />
+            </div>
+
+            <div class="sm:col-span-2">
+              <p id="salary-type-hint" class="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200"></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Data Rekening -->
+        <div class="pt-2 border-t border-slate-100">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-brand-700 mb-3">3. Data Rekening Penerima</h4>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Bank</label>
+              <input type="text" id="mp-bank-name" placeholder="BRI / Mandiri / BCA" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Nomor Rekening</label>
+              <input type="text" id="mp-bank-number" placeholder="0123456789" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Rekening (a.n.)</label>
+              <input type="text" id="mp-bank-holder" placeholder="Nama pemilik rekening" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none" />
+            </div>
+          </div>
+          <div class="mt-2 flex items-center justify-between text-[11px] text-slate-500 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+            <span><i class="fa-solid fa-circle-info text-brand-700 mr-1"></i>Perhitungan kehadiran untuk <strong>Site Salary v.1</strong> & <strong>v.2</strong> dikalikan dengan kolom <strong>Hadir / Masuk (M)</strong>.</span>
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-100 flex justify-end gap-2">
+          <button type="button" onclick="closeModal('modal-manpower')" class="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition">Batal</button>
+          <button type="submit" class="px-5 py-2 text-sm font-semibold text-white bg-brand-700 rounded-xl hover:bg-brand-800 transition">Simpan Manpower</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 4: Confirmation Dialog -->
+  <div id="modal-confirm" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4 no-print">
+    <div class="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 border border-slate-200 space-y-4">
+      <div class="flex items-start gap-3">
+        <div class="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+        <div>
+          <h3 id="confirm-title" class="text-base font-bold text-slate-900">Konfirmasi Hapus</h3>
+          <p id="confirm-message" class="text-xs text-slate-600 mt-1 leading-relaxed"></p>
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeModal('modal-confirm')" class="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition">Batal</button>
+        <button id="confirm-yes-btn" class="px-4 py-2 text-xs font-semibold text-white bg-rose-600 rounded-xl hover:bg-rose-700 transition">Ya, Lanjutkan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 5: Supabase Config, Backup & Restore -->
+  <div id="modal-backup" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4 no-print overflow-y-auto">
+    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full overflow-hidden border border-slate-200 my-8">
+      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+        <h3 class="text-base font-bold text-slate-900">Pengaturan Supabase & Backup Data</h3>
+        <button onclick="closeModal('modal-backup')" class="text-slate-400 hover:text-slate-600 p-1">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <div class="p-6 space-y-4 text-xs max-h-[82vh] overflow-y-auto">
+        <!-- Form Koneksi Supabase -->
+        <form onsubmit="handleSaveSupabaseConfig(event)" class="space-y-3 p-3.5 rounded-xl bg-brand-50/60 border border-brand-200">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-brand-900"><i class="fa-solid fa-bolt mr-1"></i>Koneksi Supabase</span>
+            <span id="cloud-user-info" class="text-[11px] font-semibold text-slate-600">Menghubungkan...</span>
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-700 mb-1">Supabase Project URL</label>
+            <input type="url" id="sb-url-input" placeholder="https://xxxxxxxxxxxx.supabase.co" class="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-600 outline-none" />
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-700 mb-1">Supabase Anon Public Key</label>
+            <input type="text" id="sb-key-input" placeholder="sb_publishable_..." class="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-600 outline-none" />
+          </div>
+          <div class="flex justify-end gap-2 pt-1">
+            <button type="button" onclick="clearSupabaseConfig()" class="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-100">Putuskan</button>
+            <button type="submit" class="px-3.5 py-1.5 text-xs font-semibold text-white bg-brand-700 rounded-lg hover:bg-brand-800">Simpan & Hubungkan</button>
+          </div>
+        </form>
+
+        <!-- SQL Setup Snippet -->
+        <details class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+          <summary class="cursor-pointer font-semibold text-slate-800 select-none">
+            <i class="fa-solid fa-code text-brand-700 mr-1"></i>Lihat SQL Setup Tabel Supabase (1x Jalankan di SQL Editor)
+          </summary>
+          <pre class="mt-2 p-2.5 bg-slate-900 text-emerald-300 rounded-lg text-[10px] overflow-x-auto leading-relaxed select-all">create table if not exists public.hris_company_data (
+  id text primary key,
+  payload jsonb not null,
+  updated_at timestamptz default now()
+);
+alter table public.hris_company_data disable row level security;</pre>
+        </details>
+
+        <!-- Backup & Restore -->
+        <div class="space-y-2.5 pt-2 border-t border-slate-200">
+          <button onclick="exportJSONBackup()" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-slate-800 rounded-xl hover:bg-slate-900 transition">
+            <i class="fa-solid fa-download"></i>
+            <span>Download Backup JSON</span>
+          </button>
+
+          <label class="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 border border-slate-300 rounded-xl hover:bg-slate-200 transition cursor-pointer">
+            <i class="fa-solid fa-upload"></i>
+            <span>Restore dari File JSON</span>
+            <input type="file" accept=".json" onchange="importJSONBackup(event)" class="hidden" />
+          </label>
+
+          <div class="pt-2">
+            <button onclick="confirmClearAllData()" class="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl hover:bg-rose-100 transition">
+              <i class="fa-solid fa-trash-can"></i>
+              <span>Kosongkan Seluruh Data di Supabase</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== APPLICATION LOGIC & SUPABASE SYNC ==================== -->
+  <script>
+    // =========================================================================
+    // 1. KONFIGURASI SUPABASE (MURNI CLOUD — TANPA PENYIMPANAN LOKAL)
+    // =========================================================================
+    const DEFAULT_SUPABASE_URL = 'https://rphlbpyduuqhetdweqre.supabase.co';
+    const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_2DoqFVBPhIaaQSmPMNLjgA_pRcluLfZ';
+    const SUPABASE_TABLE = 'hris_company_data';
+    const SUPABASE_RECORD_ID = 'pt_bumi_latimojong_master';
+
+    // Daftar status klik cepat untuk matriks absensi harian
+    const ATT_STATUS_META = {
+      '': { label: '-', bg: 'bg-slate-50 text-slate-300 border-slate-200 hover:bg-slate-100', title: 'Kosong (Klik untuk isi Hadir/M)' },
+      'M': { label: 'M', bg: 'bg-emerald-500 text-white border-emerald-600 font-bold shadow-2xs', title: 'Masuk / Hadir (M)' },
+      'S': { label: 'S', bg: 'bg-amber-400 text-amber-950 border-amber-500 font-bold', title: 'Sakit (S)' },
+      'ON': { label: 'ON', bg: 'bg-sky-500 text-white border-sky-600 font-bold', title: 'Onsite (ON)' },
+      'PS': { label: 'PS', bg: 'bg-indigo-500 text-white border-indigo-600 font-bold', title: 'Pindah Site (PS)' },
+      'I': { label: 'I', bg: 'bg-slate-500 text-white border-slate-600 font-bold', title: 'Izin (I)' },
+      'A': { label: 'A', bg: 'bg-rose-600 text-white border-rose-700 font-bold', title: 'Alpa (A)' },
+      'C': { label: 'C', bg: 'bg-teal-500 text-white border-teal-600 font-bold', title: 'Cuti (C)' },
+      'OFF': { label: 'OFF', bg: 'bg-purple-500 text-white border-purple-600 font-bold', title: 'Offsite (OFF)' },
+    };
+
+    // =========================================================================
+    // 2. STRUKTUR MASTER AWAL (KOSONG TANPA DATA CONTOH)
+    // =========================================================================
+    const DEFAULT_SITE_POSITIONS = [
+      'PJO',
+      'Spv. Drilling',
+      'HSE Officer',
+      'Administrasi',
+      'Logistik',
+      'Mekanik',
+      'Ast. Mekanik',
+      'Driller',
+      'Ast. Driller',
+      'Driver',
+      'Kru Rig',
+      'Koordinator Waterman',
+      'Waterman',
+      'Stoker/Cooker',
+      'Wakar',
+    ];
+
+    const DEFAULT_HO_POSITIONS = [
+      'Direktur',
+      'Manajer Operasional',
+      'Manajer Keuangan',
+      'Manajer Personalia dan Safety',
+      'Manajer Proyek',
+      'Manajer Mekanik',
+      'Administrasi Keuangan',
+      'Administrasi Operasional',
+      'Lathe Operator',
+      'Welder',
+      'Support',
+    ];
+
+    function createEmptyMasterState() {
+      const positions = [
+        ...DEFAULT_SITE_POSITIONS.map((name, idx) => ({
+          id: `pos-site-${idx + 1}`,
+          name,
+          category: 'SITE',
+          rank: idx + 1,
+        })),
+        ...DEFAULT_HO_POSITIONS.map((name, idx) => ({
+          id: `pos-ho-${idx + 1}`,
+          name,
+          category: 'HO',
+          rank: idx + 1,
+        })),
+      ];
+
+      const sites = [
+        {
+          id: 'site-ho',
+          clientName: 'PT. Bumi Latimojong (Internal)',
+          location: 'Makassar, Sulawesi Selatan',
+          siteName: 'Head Office',
+          isHO: true,
+        },
+      ];
+
+      return {
+        sites,
+        positions,
+        employees: [],
+        attendance: {},
+      };
+    }
+
+    // =========================================================================
+    // 3. STATE APLIKASI & INISIALISASI SUPABASE
+    // =========================================================================
+    let appState = createEmptyMasterState();
+    let activeTab = 'workplace';
+    let selectedPeriod = new Date().toISOString().slice(0, 7);
+    let workplaceSearch = '';
+    let workplaceSiteFilter = 'ALL';
+    let activeBrushStatus = 'M';
+    let saveDebounceTimer = null;
+    let reportSiteFilter = 'ALL';
+
+    let supabaseConfig = {
+      url: DEFAULT_SUPABASE_URL,
+      anonKey: DEFAULT_SUPABASE_ANON_KEY,
+    };
+    let supabaseClient = null;
+    let supabaseRealtimeChannel = null;
+    let isCloudConnected = false;
+
+    function updateCloudBadge(status, label) {
+      const badge = document.getElementById('cloud-status-badge');
+      const userInfo = document.getElementById('cloud-user-info');
+      if (!badge) return;
+
+      if (status === 'connected') {
+        badge.className = 'inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200';
+        badge.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600"></i><span>${escapeHTML(label)}</span>`;
+        if (userInfo) userInfo.textContent = `Terhubung (${supabaseConfig.url.replace('https://', '')})`;
+      } else if (status === 'syncing') {
+        badge.className = 'inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-sky-50 text-sky-800 border border-sky-200';
+        badge.innerHTML = `<i class="fa-solid fa-rotate fa-spin text-sky-600"></i><span>${escapeHTML(label)}</span>`;
+      } else if (status === 'error') {
+        badge.className = 'inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-rose-50 text-rose-800 border border-rose-200';
+        badge.innerHTML = `<i class="fa-solid fa-circle-exclamation text-rose-600"></i><span>${escapeHTML(label)}</span>`;
+        if (userInfo) userInfo.textContent = 'Gagal terhubung ke Supabase';
+      } else {
+        badge.className = 'inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-amber-50 text-amber-800 border border-amber-200';
+        badge.innerHTML = `<i class="fa-solid fa-database"></i><span>${escapeHTML(label)}</span>`;
+        if (userInfo) userInfo.textContent = 'Belum dikonfigurasi';
+      }
+    }
+
+    function migrateLegacySalarySchema(state) {
+      if (!state || !Array.isArray(state.employees)) return;
+      state.employees.forEach((emp) => {
+        if (emp.salaryType === 'Gaji Bulanan') {
+          emp.salaryType = 'HO Salary';
+          emp.siteAllowance = Number(emp.siteAllowance) || 0;
+        } else if (emp.salaryType === 'Gaji Pokok') {
+          emp.salaryType = 'Site Salary v.1';
+          emp.siteAllowance = Number(emp.siteAllowance) || 0;
+        } else if (emp.salaryType === 'Harian Lokasi' || emp.salaryType === 'Harian Lepas') {
+          emp.salaryType = 'Site Salary v.2';
+          emp.siteAllowance = 0;
+        } else if (!['HO Salary', 'Site Salary v.1', 'Site Salary v.2'].includes(emp.salaryType)) {
+          emp.salaryType = 'HO Salary';
+          emp.siteAllowance = Number(emp.siteAllowance) || 0;
+        }
+      });
+    }
+
+    async function saveState() {
+      if (!supabaseClient || !isCloudConnected) {
+        showToast('Belum terhubung ke Supabase. Perubahan tidak tersimpan.', 'error');
+        return;
+      }
+
+      updateCloudBadge('syncing', 'Menyimpan ke Supabase...');
+      try {
+        const { error } = await supabaseClient
+          .from(SUPABASE_TABLE)
+          .upsert(
+            {
+              id: SUPABASE_RECORD_ID,
+              payload: appState,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'id' }
+          );
+
+        if (error) throw error;
+        updateCloudBadge('connected', 'Supabase Terhubung');
+      } catch (err) {
+        console.error('Gagal menyimpan ke Supabase:', err);
+        updateCloudBadge('error', 'Gagal Simpan Supabase');
+        showToast(`Gagal sinkronisasi ke Supabase: ${err.message}`, 'error');
+      }
+    }
+
+    function scheduleSaveState() {
+      if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+      updateCloudBadge('syncing', 'Menyimpan perubahan...');
+      saveDebounceTimer = setTimeout(() => {
+        saveState();
+      }, 650);
+    }
+
+    async function initSupabase() {
+      const urlInput = document.getElementById('sb-url-input');
+      const keyInput = document.getElementById('sb-key-input');
+      if (urlInput) urlInput.value = supabaseConfig.url || '';
+      if (keyInput) keyInput.value = supabaseConfig.anonKey || '';
+
+      if (!supabaseConfig.url || !supabaseConfig.anonKey) {
+        isCloudConnected = false;
+        updateCloudBadge('offline', 'Supabase Belum Diatur');
+        renderActiveView();
+        return;
+      }
+
+      if (typeof window.supabase === 'undefined') {
+        isCloudConnected = false;
+        updateCloudBadge('error', 'SDK Supabase Gagal Dimuat');
+        renderActiveView();
+        return;
+      }
+
+      updateCloudBadge('syncing', 'Menghubungkan Supabase...');
+
+      try {
+        if (supabaseRealtimeChannel && supabaseClient) {
+          await supabaseClient.removeChannel(supabaseRealtimeChannel);
+          supabaseRealtimeChannel = null;
+        }
+
+        supabaseClient = window.supabase.createClient(supabaseConfig.url, supabaseConfig.anonKey);
+
+        const { data, error } = await supabaseClient
+          .from(SUPABASE_TABLE)
+          .select('payload')
+          .eq('id', SUPABASE_RECORD_ID)
+          .maybeSingle();
+
+        if (error) {
+          throw error;
+        }
+
+        isCloudConnected = true;
+
+        if (data && data.payload) {
+          appState = data.payload;
+          if (!Array.isArray(appState.sites) || appState.sites.length === 0) {
+            appState = createEmptyMasterState();
+          }
+          if (!Array.isArray(appState.positions)) appState.positions = createEmptyMasterState().positions;
+          if (!Array.isArray(appState.employees)) appState.employees = [];
+          if (!appState.attendance || typeof appState.attendance !== 'object') appState.attendance = {};
+          migrateLegacySalarySchema(appState);
+        } else {
+          appState = createEmptyMasterState();
+          await saveState();
+        }
+
+        updateCloudBadge('connected', 'Supabase Terhubung');
+        renderActiveView();
+
+        supabaseRealtimeChannel = supabaseClient
+          .channel('hris_company_realtime')
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: SUPABASE_TABLE,
+              filter: `id=eq.${SUPABASE_RECORD_ID}`,
+            },
+            (payload) => {
+              if (payload.new && payload.new.payload) {
+                appState = payload.new.payload;
+                migrateLegacySalarySchema(appState);
+                renderActiveView();
+                updateCloudBadge('connected', 'Supabase Terhubung');
+              }
+            }
+          )
+          .subscribe();
+      } catch (err) {
+        console.error('Supabase connection error:', err);
+        isCloudConnected = false;
+        updateCloudBadge('error', 'Cek Tabel / URL Supabase');
+        showToast(`Koneksi Supabase gagal: ${err.message}. Pastikan tabel hris_company_data sudah dibuat.`, 'error');
+        renderActiveView();
+      }
+    }
+
+    async function handleSaveSupabaseConfig(e) {
+      e.preventDefault();
+      let url = document.getElementById('sb-url-input').value.trim().replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
+      const anonKey = document.getElementById('sb-key-input').value.trim();
+
+      if (!url || !anonKey) {
+        showToast('Project URL dan Anon Public Key wajib diisi.', 'error');
+        return;
+      }
+
+      supabaseConfig = { url, anonKey };
+      closeModal('modal-backup');
+      await initSupabase();
+      if (isCloudConnected) {
+        showToast('Berhasil terhubung ke Supabase!');
+      }
+    }
+
+    async function clearSupabaseConfig() {
+      if (supabaseRealtimeChannel && supabaseClient) {
+        await supabaseClient.removeChannel(supabaseRealtimeChannel);
+        supabaseRealtimeChannel = null;
+      }
+      supabaseConfig = { url: '', anonKey: '' };
+      supabaseClient = null;
+      isCloudConnected = false;
+      document.getElementById('sb-url-input').value = '';
+      document.getElementById('sb-key-input').value = '';
+      updateCloudBadge('offline', 'Koneksi Diputus');
+      showToast('Koneksi Supabase diputus.', 'info');
+    }
+
+    // =========================================================================
+    // 4. HELPER FORMATTING, HIERARKI JABATAN & PERHITUNGAN PAYROLL
+    // =========================================================================
+    function escapeHTML(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatRupiah(num) {
+      const val = Math.round(Number(num) || 0);
+      return 'Rp ' + val.toLocaleString('id-ID');
+    }
+
+    function formatNumber(num) {
+      const val = Math.round(Number(num) || 0);
+      return val.toLocaleString('id-ID');
+    }
+
+    function formatPeriodIndo(ym) {
+      if (!ym) return '-';
+      const [y, m] = ym.split('-');
+      const months = [
+        'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+        'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+      ];
+      return `${months[parseInt(m, 10) - 1] || m} ${y}`;
+    }
+
+    function getDaysInPeriod(ym) {
+      if (!ym) return 30;
+      const [y, m] = ym.split('-').map(Number);
+      return new Date(y, m, 0).getDate();
+    }
+
+    function getPositionMeta(posName, isHO = false) {
+      const targetCategory = isHO ? 'HO' : 'SITE';
+      const exact = appState.positions.find(
+        (p) => p.name.toLowerCase() === String(posName || '').toLowerCase() && p.category === targetCategory
+      );
+      if (exact) return exact;
+      const fallback = appState.positions.find(
+        (p) => p.name.toLowerCase() === String(posName || '').toLowerCase()
+      );
+      return fallback || { name: posName, category: targetCategory, rank: 999 };
+    }
+
+    function sortEmployeesByHierarchy(employees, isHO = false) {
+      return [...employees].sort((a, b) => {
+        const metaA = getPositionMeta(a.position, isHO);
+        const metaB = getPositionMeta(b.position, isHO);
+        if (metaA.rank !== metaB.rank) return metaA.rank - metaB.rank;
+        return String(a.name || '').localeCompare(String(b.name || ''), 'id');
+      });
+    }
+
+    function getEmployeeAttendance(empId, period = selectedPeriod) {
+      const periodData = appState.attendance[period] || {};
+      const emp = appState.employees.find((e) => e.id === empId);
+      const defaultTx = emp ? emp.defaultTxType : 'Transfer';
+      const base = periodData[empId] || {
+        days: {},
+        hadir: 0,
+        sakit: 0,
+        onsite: 0,
+        pindah: 0,
+        izin: 0,
+        alpa: 0,
+        cuti: 0,
+        offsite: 0,
+        stdDays: 26,
+        insentif: 0,
+        kasbon: 0,
+        txType: defaultTx,
+      };
+      if (!base.days || typeof base.days !== 'object') {
+        base.days = {};
+      }
+      return base;
+    }
+
+    function syncCountsFromDailyMap(attObj) {
+      const counts = {
+        hadir: 0,
+        sakit: 0,
+        onsite: 0,
+        pindah: 0,
+        izin: 0,
+        alpa: 0,
+        cuti: 0,
+        offsite: 0,
+      };
+      Object.values(attObj.days || {}).forEach((code) => {
+        if (code === 'M') counts.hadir++;
+        else if (code === 'S') counts.sakit++;
+        else if (code === 'ON') counts.onsite++;
+        else if (code === 'PS') counts.pindah++;
+        else if (code === 'I') counts.izin++;
+        else if (code === 'A') counts.alpa++;
+        else if (code === 'C') counts.cuti++;
+        else if (code === 'OFF') counts.offsite++;
+      });
+      Object.assign(attObj, counts);
+    }
+
+    function calculateEmployeePayroll(emp, att) {
+      const hadir = Number(att.hadir) || 0;
+      const sakit = Number(att.sakit) || 0;
+      const onsite = Number(att.onsite) || 0;
+      const pindah = Number(att.pindah) || 0;
+      const izin = Number(att.izin) || 0;
+      const alpa = Number(att.alpa) || 0;
+      const cuti = Number(att.cuti) || 0;
+      const offsite = Number(att.offsite) || 0;
+
+      const hariHadirKerja = hadir;
+      const totalHariRekap = hadir + sakit + onsite + pindah + izin + alpa + cuti + offsite;
+
+      const rate = Number(emp.salaryAmount) || 0;
+      const allowanceRate = Number(emp.siteAllowance) || 0;
+      let gajiKotor = 0;
+
+      switch (emp.salaryType) {
+        case 'HO Salary':
+          gajiKotor = rate;
+          break;
+        case 'Site Salary v.1':
+          gajiKotor = rate + allowanceRate * hariHadirKerja;
+          break;
+        case 'Site Salary v.2':
+          gajiKotor = rate * hariHadirKerja;
+          break;
+        default:
+          gajiKotor = rate;
+      }
+
+      const kasbon = Number(att.kasbon) || 0;
+      const insentif = Number(att.insentif) || 0;
+      const gajiBersih = Math.max(0, Math.round(gajiKotor + insentif - kasbon));
+
+      return {
+        hariHadirKerja,
+        totalHariRekap,
+        gajiKotor: Math.round(gajiKotor),
+        kasbon: Math.round(kasbon),
+        insentif: Math.round(insentif),
+        gajiBersih,
+      };
+    }
+
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toast-container');
+      if (!container) return;
+      const toast = document.createElement('div');
+      const colors = {
+        success: 'bg-brand-800 text-white border-brand-700',
+        error: 'bg-rose-700 text-white border-rose-600',
+        info: 'bg-slate-800 text-white border-slate-700',
+      };
+      const icons = {
+        success: 'fa-circle-check',
+        error: 'fa-circle-exclamation',
+        info: 'fa-circle-info',
+      };
+      toast.className = `flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-lg border text-xs font-semibold transition-all duration-300 ${colors[type] || colors.success}`;
+      toast.innerHTML = `<i class="fa-solid ${icons[type] || icons.success} text-sm"></i><span>${escapeHTML(message)}</span>`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(8px)';
+        setTimeout(() => toast.remove(), 300);
+      }, 3200);
+    }
+
+    // =========================================================================
+    // 5. NAVIGATION & MODAL CONTROLLERS
+    // =========================================================================
+    function switchTab(tabName) {
+      activeTab = tabName;
+      document.querySelectorAll('.tab-view').forEach((el) => el.classList.add('hidden'));
+      const activeView = document.getElementById(`view-${tabName}`);
+      if (activeView) activeView.classList.remove('hidden');
+
+      document.querySelectorAll('.nav-tab').forEach((btn) => {
+        btn.classList.remove('border-brand-700', 'text-brand-800', 'bg-brand-50/50');
+        btn.classList.add('border-transparent', 'text-slate-500', 'hover:text-slate-800', 'hover:border-slate-300');
+      });
+      const activeBtn = document.getElementById(`tab-btn-${tabName}`);
+      if (activeBtn) {
+        activeBtn.classList.remove('border-transparent', 'text-slate-500', 'hover:text-slate-800', 'hover:border-slate-300');
+        activeBtn.classList.add('border-brand-700', 'text-brand-800', 'bg-brand-50/50');
+      }
+
+      renderActiveView();
+    }
+
+    function renderActiveView() {
+      if (activeTab === 'review') renderReviewTab();
+      else if (activeTab === 'salary') renderSalaryTab();
+      else if (activeTab === 'workplace') renderWorkplaceTab();
+      else if (activeTab === 'laporan') renderLaporanTab();
+    }
+
+    function openModal(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.remove('hidden');
+      el.classList.add('flex');
+    }
+
+    function closeModal(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.add('hidden');
+      el.classList.remove('flex');
+    }
+
+    function openConfirmModal(title, message, onConfirm) {
+      document.getElementById('confirm-title').textContent = title;
+      document.getElementById('confirm-message').textContent = message;
+      const yesBtn = document.getElementById('confirm-yes-btn');
+      yesBtn.onclick = () => {
+        closeModal('modal-confirm');
+        onConfirm();
+      };
+      openModal('modal-confirm');
+    }
+
+    // =========================================================================
+    // 6. TAB 1: REVIEW (READ-ONLY REKAP ABSENSI PER SITE)
+    // =========================================================================
+    function renderReviewTab() {
+      const container = document.getElementById('view-review');
+      const activeEmployees = appState.employees.filter((e) => e.status === 'Aktif');
+
+      const siteCards = appState.sites
+        .map((site) => {
+          const siteEmps = sortEmployeesByHierarchy(
+            activeEmployees.filter((e) => e.siteId === site.id),
+            Boolean(site.isHO)
+          );
+
+          return `
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+              <div class="px-5 py-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full ${site.isHO ? 'bg-indigo-600' : 'bg-brand-600'}"></span>
+                    <h3 class="text-base font-bold text-slate-900">${escapeHTML(site.siteName)}</h3>
+                    <span class="text-xs px-2 py-0.5 rounded-md bg-white border border-slate-200 font-semibold text-slate-600">
+                      ${escapeHTML(site.clientName)}
+                    </span>
+                  </div>
+                  <p class="text-xs text-slate-500 mt-0.5 ml-4.5">
+                    <i class="fa-solid fa-location-dot mr-1"></i>${escapeHTML(site.location)}
+                  </p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-200/70 text-slate-700">
+                    <i class="fa-solid fa-lock text-[10px]"></i> Read-Only
+                  </span>
+                  <span class="px-3 py-1 rounded-lg text-xs font-bold bg-brand-50 text-brand-800 border border-brand-200">
+                    ${siteEmps.length} Karyawan
+                  </span>
+                </div>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                      <th class="py-3 px-4 w-12 text-center">No</th>
+                      <th class="py-3 px-4">Nama Karyawan</th>
+                      <th class="py-3 px-4">Jabatan</th>
+                      <th class="py-3 px-2.5 text-center bg-emerald-50/70 text-emerald-900">Hadir (M)</th>
+                      <th class="py-3 px-2.5 text-center">Sakit (S)</th>
+                      <th class="py-3 px-2.5 text-center">Onsite (ON)</th>
+                      <th class="py-3 px-2.5 text-center">Pindah Site (PS)</th>
+                      <th class="py-3 px-2.5 text-center">Izin (I)</th>
+                      <th class="py-3 px-2.5 text-center bg-rose-50/60 text-rose-900">Alpa (A)</th>
+                      <th class="py-3 px-2.5 text-center">Cuti (C)</th>
+                      <th class="py-3 px-2.5 text-center">Offsite (OFF)</th>
+                      <th class="py-3 px-4 text-center bg-slate-100 text-slate-900">Total Hari</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 text-xs">
+                    ${
+                      siteEmps.length === 0
+                        ? `<tr><td colspan="12" class="py-6 text-center text-slate-400 italic">Belum ada karyawan aktif pada lokasi ini.</td></tr>`
+                        : siteEmps
+                            .map((emp, idx) => {
+                              const att = getEmployeeAttendance(emp.id);
+                              const calc = calculateEmployeePayroll(emp, att);
+                              return `
+                                <tr class="hover:bg-slate-50/80 transition">
+                                  <td class="py-3 px-4 text-center font-semibold text-slate-500">${idx + 1}</td>
+                                  <td class="py-3 px-4 font-bold text-slate-900">${escapeHTML(emp.name)}</td>
+                                  <td class="py-3 px-4 text-slate-700 font-medium">${escapeHTML(emp.position)}</td>
+                                  <td class="py-3 px-2.5 text-center font-bold text-emerald-800 bg-emerald-50/30">${att.hadir || 0}</td>
+                                  <td class="py-3 px-2.5 text-center text-slate-700">${att.sakit || 0}</td>
+                                  <td class="py-3 px-2.5 text-center text-slate-700">${att.onsite || 0}</td>
+                                  <td class="py-3 px-2.5 text-center text-slate-700">${att.pindah || 0}</td>
+                                  <td class="py-3 px-2.5 text-center text-slate-700">${att.izin || 0}</td>
+                                  <td class="py-3 px-2.5 text-center font-semibold text-rose-700 bg-rose-50/30">${att.alpa || 0}</td>
+                                  <td class="py-3 px-2.5 text-center text-slate-700">${att.cuti || 0}</td>
+                                  <td class="py-3 px-2.5 text-center text-slate-700">${att.offsite || 0}</td>
+                                  <td class="py-3 px-4 text-center font-bold text-slate-900 bg-slate-50">${calc.totalHariRekap}</td>
+                                </tr>
+                              `;
+                            })
+                            .join('')
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+
+      container.innerHTML = `
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h2 class="text-base sm:text-lg font-bold text-slate-900">Review Absensi Kehadiran — ${formatPeriodIndo(selectedPeriod)}</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Rekap kehadiran terpisah per site dan diurutkan berdasarkan hierarki jabatan tertinggi. Mode hanya-baca (Read-Only).</p>
+          </div>
+          <div class="flex items-center gap-2 text-xs font-semibold text-brand-800 bg-brand-50 px-3.5 py-2 rounded-xl border border-brand-200 self-start sm:self-center">
+            <i class="fa-solid fa-users"></i>
+            <span>Total Aktif: ${activeEmployees.length} Manpower</span>
+          </div>
+        </div>
+        ${siteCards}
+      `;
+    }
+
+    // =========================================================================
+    // 7. TAB 2: SALARY (READ-ONLY REKAP GAJI PER SITE)
+    // =========================================================================
+    function renderSalaryTab() {
+      const container = document.getElementById('view-salary');
+      const activeEmployees = appState.employees.filter((e) => e.status === 'Aktif');
+
+      let grandKotor = 0;
+      let grandKasbon = 0;
+      let grandInsentif = 0;
+      let grandBersih = 0;
+
+      const siteCards = appState.sites
+        .map((site) => {
+          const siteEmps = sortEmployeesByHierarchy(
+            activeEmployees.filter((e) => e.siteId === site.id),
+            Boolean(site.isHO)
+          );
+
+          let subKotor = 0;
+          let subKasbon = 0;
+          let subInsentif = 0;
+          let subBersih = 0;
+
+          const rowsHtml =
+            siteEmps.length === 0
+              ? `<tr><td colspan="9" class="py-6 text-center text-slate-400 italic">Belum ada karyawan aktif pada lokasi ini.</td></tr>`
+              : siteEmps
+                  .map((emp, idx) => {
+                    const att = getEmployeeAttendance(emp.id);
+                    const calc = calculateEmployeePayroll(emp, att);
+
+                    subKotor += calc.gajiKotor;
+                    subKasbon += calc.kasbon;
+                    subInsentif += calc.insentif;
+                    subBersih += calc.gajiBersih;
+
+                    let schemeDetail = '';
+                    if (emp.salaryType === 'HO Salary') {
+                      schemeDetail = `<span class="text-[10px] text-slate-500">HO Salary (${formatRupiah(emp.salaryAmount)}/bln)</span>`;
+                    } else if (emp.salaryType === 'Site Salary v.1') {
+                      schemeDetail = `<span class="text-[10px] text-slate-500">v.1 (${formatNumber(emp.salaryAmount)} + ${formatNumber(emp.siteAllowance)}×${calc.hariHadirKerja}hr)</span>`;
+                    } else {
+                      schemeDetail = `<span class="text-[10px] text-slate-500">v.2 (${formatNumber(emp.salaryAmount)}×${calc.hariHadirKerja}hr)</span>`;
+                    }
+
+                    return `
+                      <tr class="hover:bg-slate-50/80 transition">
+                        <td class="py-3 px-4 text-center font-semibold text-slate-500">${idx + 1}</td>
+                        <td class="py-3 px-4 font-bold text-slate-900">${escapeHTML(emp.name)}</td>
+                        <td class="py-3 px-4 text-slate-700 font-medium">${escapeHTML(emp.position)}</td>
+                        <td class="py-3 px-4">${schemeDetail}</td>
+                        <td class="py-3 px-3 text-center font-bold text-slate-800">${calc.hariHadirKerja} Hari</td>
+                        <td class="py-3 px-4 text-right font-medium text-slate-800">${formatRupiah(calc.gajiKotor)}</td>
+                        <td class="py-3 px-4 text-right font-medium text-rose-700">${calc.kasbon > 0 ? '- ' + formatRupiah(calc.kasbon) : 'Rp 0'}</td>
+                        <td class="py-3 px-4 text-right font-medium text-emerald-700">${calc.insentif > 0 ? '+ ' + formatRupiah(calc.insentif) : 'Rp 0'}</td>
+                        <td class="py-3 px-4 text-right font-bold text-brand-900 bg-brand-50/40">${formatRupiah(calc.gajiBersih)}</td>
+                      </tr>
+                    `;
+                  })
+                  .join('');
+
+          grandKotor += subKotor;
+          grandKasbon += subKasbon;
+          grandInsentif += subInsentif;
+          grandBersih += subBersih;
+
+          return `
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+              <div class="px-5 py-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full ${site.isHO ? 'bg-indigo-600' : 'bg-brand-600'}"></span>
+                    <h3 class="text-base font-bold text-slate-900">${escapeHTML(site.siteName)}</h3>
+                    <span class="text-xs text-slate-500">(${escapeHTML(site.clientName)})</span>
+                  </div>
+                  <p class="text-xs text-slate-500 mt-0.5 ml-4.5">${escapeHTML(site.location)}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-200/70 text-slate-700">
+                    <i class="fa-solid fa-lock text-[10px]"></i> Read-Only
+                  </span>
+                  <span class="px-3 py-1 rounded-lg text-xs font-bold bg-brand-700 text-white">
+                    Total Bersih: ${formatRupiah(subBersih)}
+                  </span>
+                </div>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                      <th class="py-3 px-4 w-12 text-center">No</th>
+                      <th class="py-3 px-4">Nama Karyawan</th>
+                      <th class="py-3 px-4">Jabatan</th>
+                      <th class="py-3 px-4">Skema Gaji</th>
+                      <th class="py-3 px-3 text-center">Kehadiran</th>
+                      <th class="py-3 px-4 text-right">Gaji Kotor</th>
+                      <th class="py-3 px-4 text-right">Kasbon</th>
+                      <th class="py-3 px-4 text-right">Insentif</th>
+                      <th class="py-3 px-4 text-right bg-brand-50/70 text-brand-900">Gaji Bersih</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 text-xs">
+                    ${rowsHtml}
+                  </tbody>
+                  ${
+                    siteEmps.length > 0
+                      ? `<tfoot>
+                          <tr class="bg-slate-100/80 border-t-2 border-slate-200 text-xs font-bold text-slate-900">
+                            <td colspan="5" class="py-3 px-4 text-right uppercase tracking-wider text-[11px]">Subtotal ${escapeHTML(site.siteName)}</td>
+                            <td class="py-3 px-4 text-right">${formatRupiah(subKotor)}</td>
+                            <td class="py-3 px-4 text-right text-rose-700">${formatRupiah(subKasbon)}</td>
+                            <td class="py-3 px-4 text-right text-emerald-700">${formatRupiah(subInsentif)}</td>
+                            <td class="py-3 px-4 text-right text-brand-900 bg-brand-100/60">${formatRupiah(subBersih)}</td>
+                          </tr>
+                        </tfoot>`
+                      : ''
+                  }
+                </table>
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+
+      container.innerHTML = `
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <h2 class="text-base sm:text-lg font-bold text-slate-900">Rekapitulasi Salary Karyawan — ${formatPeriodIndo(selectedPeriod)}</h2>
+              <p class="text-xs text-slate-500 mt-0.5">Perhitungan otomatis berdasarkan skema HO Salary, Site Salary v.1, dan Site Salary v.2. Mode hanya-baca (Read-Only).</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+            <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+              <div class="text-[11px] font-semibold text-slate-500">Total Gaji Kotor</div>
+              <div class="text-sm sm:text-base font-bold text-slate-900 mt-0.5">${formatRupiah(grandKotor)}</div>
+            </div>
+            <div class="p-3.5 rounded-xl bg-rose-50/70 border border-rose-200">
+              <div class="text-[11px] font-semibold text-rose-700">Total Kasbon</div>
+              <div class="text-sm sm:text-base font-bold text-rose-800 mt-0.5">${formatRupiah(grandKasbon)}</div>
+            </div>
+            <div class="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200">
+              <div class="text-[11px] font-semibold text-emerald-700">Total Insentif</div>
+              <div class="text-sm sm:text-base font-bold text-emerald-800 mt-0.5">${formatRupiah(grandInsentif)}</div>
+            </div>
+            <div class="p-3.5 rounded-xl bg-brand-700 text-white">
+              <div class="text-[11px] font-semibold text-brand-100">Total Gaji Bersih Dibayarkan</div>
+              <div class="text-sm sm:text-base font-bold mt-0.5">${formatRupiah(grandBersih)}</div>
+            </div>
+          </div>
+        </div>
+        ${siteCards}
+      `;
+    }
+
+    // =========================================================================
+    // 8. TAB 3: WORKPLACE & MANPOWER (CRUD & ATTENDANCE MATRIX PER SITE)
+    // =========================================================================
+    function renderWorkplaceTab() {
+      const container = document.getElementById('view-workplace');
+
+      const activeEmployees = appState.employees.filter((e) => e.status === 'Aktif');
+      const resignedEmployees = appState.employees.filter((e) => e.status === 'Resign');
+      const daysInMonth = getDaysInPeriod(selectedPeriod);
+      const [yearNum, monthNum] = selectedPeriod.split('-').map(Number);
+
+      const visibleSites =
+        workplaceSiteFilter === 'ALL'
+          ? appState.sites
+          : appState.sites.filter((s) => s.id === workplaceSiteFilter);
+
+      const filteredActive = activeEmployees.filter((emp) => {
+        const matchSite = workplaceSiteFilter === 'ALL' || emp.siteId === workplaceSiteFilter;
+        const q = workplaceSearch.toLowerCase();
+        const matchQuery =
+          !q ||
+          emp.name.toLowerCase().includes(q) ||
+          emp.nik.toLowerCase().includes(q) ||
+          emp.position.toLowerCase().includes(q);
+        return matchSite && matchQuery;
+      });
+
+      const sortedActive = [...filteredActive].sort((a, b) => {
+        const siteA = appState.sites.find((s) => s.id === a.siteId);
+        const siteB = appState.sites.find((s) => s.id === b.siteId);
+        const siteNameA = siteA ? siteA.siteName : '';
+        const siteNameB = siteB ? siteB.siteName : '';
+        if (siteNameA !== siteNameB) return siteNameA.localeCompare(siteNameB, 'id');
+        const metaA = getPositionMeta(a.position, siteA?.isHO);
+        const metaB = getPositionMeta(b.position, siteB?.isHO);
+        if (metaA.rank !== metaB.rank) return metaA.rank - metaB.rank;
+        return a.name.localeCompare(b.name, 'id');
+      });
+
+      const dayHeaders = Array.from({ length: daysInMonth }, (_, i) => {
+        const d = i + 1;
+        const dateObj = new Date(yearNum, monthNum - 1, d);
+        const isSunday = dateObj.getDay() === 0;
+        return { day: d, isSunday };
+      });
+
+      const attendanceSitesHtml = visibleSites
+        .map((site) => {
+          const siteEmps = sortEmployeesByHierarchy(
+            activeEmployees.filter((e) => {
+              if (e.siteId !== site.id) return false;
+              const q = workplaceSearch.toLowerCase();
+              return (
+                !q ||
+                e.name.toLowerCase().includes(q) ||
+                e.nik.toLowerCase().includes(q) ||
+                e.position.toLowerCase().includes(q)
+              );
+            }),
+            Boolean(site.isHO)
+          );
+
+          return `
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+              <div class="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full ${site.isHO ? 'bg-indigo-600' : 'bg-brand-600'}"></span>
+                    <h3 class="text-sm sm:text-base font-bold text-slate-900">${escapeHTML(site.siteName)}</h3>
+                    <span class="text-xs text-slate-500">(${escapeHTML(site.clientName)})</span>
+                  </div>
+                  <p class="text-[11px] text-slate-500 mt-0.5 ml-4.5">
+                    Klik kotak tanggal untuk menandai status <strong>${activeBrushStatus === '' ? 'Hapus/Kosong' : activeBrushStatus}</strong>, atau gunakan tombol cepat per karyawan.
+                  </p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                  ${
+                    siteEmps.length > 0
+                      ? `<button
+                          onclick="bulkFillSiteAttendance('${site.id}', 'M')"
+                          class="px-3 py-1.5 text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition"
+                          title="Tandai semua karyawan site ini Hadir (M) pada seluruh tanggal bulan ini"
+                        >
+                          <i class="fa-solid fa-check-double mr-1"></i>Full Hadir 1 Site
+                        </button>`
+                      : ''
+                  }
+                  <span class="text-xs font-bold text-slate-700 bg-white px-2.5 py-1 rounded-lg border border-slate-200">
+                    ${siteEmps.length} Manpower
+                  </span>
+                </div>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="bg-slate-50 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                      <th class="py-2.5 px-3 sticky-col-name min-w-[200px] border-r border-slate-200">Nama & Jabatan</th>
+                      <th class="py-2.5 px-2 text-center min-w-[92px] border-r border-slate-200">Aksi Cepat</th>
+                      ${dayHeaders
+                        .map(
+                          (dh) =>
+                            `<th class="py-2 px-0.5 text-center min-w-[28px] ${
+                              dh.isSunday ? 'bg-rose-50 text-rose-700' : ''
+                            }">${dh.day}</th>`
+                        )
+                        .join('')}
+                      <th class="py-2.5 px-2 text-center bg-emerald-50 text-emerald-900 border-l border-slate-200 min-w-[54px]">Hadir</th>
+                      <th class="py-2.5 px-2 text-right min-w-[105px]">Insentif (Rp)</th>
+                      <th class="py-2.5 px-2 text-right min-w-[105px]">Kasbon (Rp)</th>
+                      <th class="py-2.5 px-2 text-center min-w-[105px]">Transaksi</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 text-xs">
+                    ${
+                      siteEmps.length === 0
+                        ? `<tr><td colspan="${daysInMonth + 6}" class="py-6 text-center text-slate-400 italic">Belum ada manpower aktif di site ini.</td></tr>`
+                        : siteEmps
+                            .map((emp) => {
+                              const att = getEmployeeAttendance(emp.id);
+                              const calc = calculateEmployeePayroll(emp, att);
+                              const txType = att.txType || emp.defaultTxType || 'Transfer';
+
+                              const dayCells = dayHeaders
+                                .map((dh) => {
+                                  const code = (att.days && att.days[dh.day]) || '';
+                                  const meta = ATT_STATUS_META[code] || ATT_STATUS_META[''];
+                                  return `
+                                    <td class="p-0.5 text-center ${dh.isSunday ? 'bg-rose-50/40' : ''}">
+                                      <button
+                                        type="button"
+                                        onclick="toggleDailyCell('${emp.id}', ${dh.day})"
+                                        oncontextmenu="event.preventDefault(); clearDailyCell('${emp.id}', ${dh.day});"
+                                        title="Tgl ${dh.day} — ${meta.title} (Klik kiri: terapkan kuas '${activeBrushStatus || 'Kosong'}' | Klik kanan: kosongkan)"
+                                        class="w-6 h-6 rounded text-[10px] border transition flex items-center justify-center mx-auto select-none cursor-pointer ${meta.bg}"
+                                      >
+                                        ${meta.label}
+                                      </button>
+                                    </td>
+                                  `;
+                                })
+                                .join('');
+
+                              return `
+                                <tr class="hover:bg-slate-50/70 transition">
+                                  <td class="py-2 px-3 sticky-col-name border-r border-slate-200">
+                                    <div class="font-bold text-slate-900 leading-tight truncate max-w-[190px]" title="${escapeHTML(emp.name)}">${escapeHTML(emp.name)}</div>
+                                    <div class="text-[10px] text-slate-500 mt-0.5">${escapeHTML(emp.position)}</div>
+                                  </td>
+                                  <td class="py-2 px-1.5 text-center border-r border-slate-200 whitespace-nowrap">
+                                    <button
+                                      type="button"
+                                      onclick="fillEmployeeAllDays('${emp.id}', 'M')"
+                                      title="Isi Hadir (M) semua tanggal bulan ini"
+                                      class="px-1.5 py-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded hover:bg-emerald-100 mr-0.5"
+                                    >
+                                      Full M
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onclick="fillEmployeeAllDays('${emp.id}', '')"
+                                      title="Kosongkan semua tanggal bulan ini"
+                                      class="px-1.5 py-1 text-[10px] font-semibold text-slate-600 bg-slate-100 border border-slate-200 rounded hover:bg-slate-200"
+                                    >
+                                      Reset
+                                    </button>
+                                  </td>
+                                  ${dayCells}
+                                  <td class="py-2 px-2 text-center font-bold text-emerald-800 bg-emerald-50/40 border-l border-slate-200">
+                                    ${calc.hariHadirKerja}
+                                  </td>
+                                  <td class="py-1.5 px-1.5">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="5000"
+                                      value="${att.insentif || 0}"
+                                      onchange="updateInlinePayrollField('${emp.id}', 'insentif', this.value)"
+                                      class="w-24 px-2 py-1 text-right text-xs font-medium border border-slate-200 rounded-lg focus:ring-1 focus:ring-brand-600 outline-none"
+                                    />
+                                  </td>
+                                  <td class="py-1.5 px-1.5">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="5000"
+                                      value="${att.kasbon || 0}"
+                                      onchange="updateInlinePayrollField('${emp.id}', 'kasbon', this.value)"
+                                      class="w-24 px-2 py-1 text-right text-xs font-medium border border-slate-200 rounded-lg focus:ring-1 focus:ring-brand-600 outline-none"
+                                    />
+                                  </td>
+                                  <td class="py-1.5 px-1.5">
+                                    <select
+                                      onchange="updateInlinePayrollField('${emp.id}', 'txType', this.value)"
+                                      class="w-24 px-1.5 py-1 text-[11px] font-medium bg-white border border-slate-200 rounded-lg focus:ring-1 focus:ring-brand-600 outline-none"
+                                    >
+                                      <option value="Transfer" ${txType === 'Transfer' ? 'selected' : ''}>Transfer</option>
+                                      <option value="Cash Lokasi" ${txType === 'Cash Lokasi' ? 'selected' : ''}>Cash Lokasi</option>
+                                    </select>
+                                  </td>
+                                </tr>
+                              `;
+                            })
+                            .join('')
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+
+      container.innerHTML = `
+        <!-- SECTION A: WORKPLACE / SITE MANAGEMENT -->
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div class="px-5 py-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h2 class="text-base font-bold text-slate-900">Manajemen Lokasi Kerja (Workplace / Site)</h2>
+              <p class="text-xs text-slate-500 mt-0.5">Kelola daftar site proyek dan lokasi kerja PT. Bumi Latimojong.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button onclick="openPositionModal()" class="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 border border-slate-300 rounded-xl hover:bg-slate-200 transition">
+                <i class="fa-solid fa-briefcase"></i>
+                <span>+ Tambah Jabatan Baru</span>
+              </button>
+              <button onclick="openSiteModal()" class="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-brand-700 rounded-xl hover:bg-brand-800 transition shadow-xs">
+                <i class="fa-solid fa-plus"></i>
+                <span>Tambah Site Baru</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="p-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            ${appState.sites
+              .map((site) => {
+                const count = activeEmployees.filter((e) => e.siteId === site.id).length;
+                return `
+                  <div class="rounded-xl border border-slate-200 p-4 bg-slate-50/50 hover:bg-white hover:shadow-xs transition flex flex-col justify-between gap-3">
+                    <div>
+                      <div class="flex items-start justify-between gap-2">
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-bold ${
+                          site.isHO ? 'bg-indigo-100 text-indigo-800' : 'bg-brand-100 text-brand-800'
+                        }">
+                          <i class="fa-solid ${site.isHO ? 'fa-building' : 'fa-helmet-safety'}"></i>
+                          ${escapeHTML(site.siteName)}
+                        </span>
+                        <span class="text-xs font-bold text-slate-700 bg-white px-2 py-0.5 rounded-md border border-slate-200">
+                          ${count} MP
+                        </span>
+                      </div>
+                      <div class="mt-2.5 space-y-1 text-xs">
+                        <div class="text-slate-800 font-semibold">Klien: ${escapeHTML(site.clientName)}</div>
+                        <div class="text-slate-500"><i class="fa-solid fa-location-dot mr-1 text-slate-400"></i>${escapeHTML(site.location)}</div>
+                      </div>
+                    </div>
+                    <div class="pt-2 border-t border-slate-200/70 flex items-center justify-end gap-2">
+                      <button onclick="openSiteModal('${site.id}')" class="px-2.5 py-1 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition">
+                        <i class="fa-solid fa-pen-to-square mr-1"></i>Edit
+                      </button>
+                      ${
+                        !site.isHO
+                          ? `<button onclick="deleteSite('${site.id}')" class="px-2.5 py-1 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100 transition">
+                              <i class="fa-solid fa-trash-can mr-1"></i>Hapus
+                            </button>`
+                          : `<span class="text-[10px] text-slate-400 italic px-1">Kantor Pusat</span>`
+                      }
+                    </div>
+                  </div>
+                `;
+              })
+              .join('')}
+          </div>
+        </div>
+
+        <!-- SECTION B: ABSENSI KLIK CEPAT SERENTAK PER SITE -->
+        <div class="space-y-4">
+          <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+              <div>
+                <h2 class="text-base font-bold text-slate-900">Absensi Klik Cepat Serentak per Site (${formatPeriodIndo(selectedPeriod)})</h2>
+                <p class="text-xs text-slate-500 mt-0.5">
+                  Pilih status kuas di bawah, lalu klik langsung pada tanggal kehadiran karyawan di masing-masing site. Data bulan sebelumnya tetap tersimpan aman.
+                </p>
+              </div>
+              <button onclick="openManpowerModal()" class="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-semibold text-white bg-brand-700 rounded-xl hover:bg-brand-800 transition shadow-xs self-start lg:self-center">
+                <i class="fa-solid fa-user-plus"></i>
+                <span>Tambah Manpower Baru</span>
+              </button>
+            </div>
+
+            <!-- Status Brush Selector & Site/Search Filter -->
+            <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pt-3 border-t border-slate-100">
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-xs font-bold text-slate-700 mr-1">Pilih Status Klik:</span>
+                ${[
+                  { code: 'M', label: 'M (Hadir)' },
+                  { code: 'S', label: 'S (Sakit)' },
+                  { code: 'ON', label: 'ON (Onsite)' },
+                  { code: 'PS', label: 'PS (Pindah Site)' },
+                  { code: 'I', label: 'I (Izin)' },
+                  { code: 'A', label: 'A (Alpa)' },
+                  { code: 'C', label: 'C (Cuti)' },
+                  { code: 'OFF', label: 'OFF (Offsite)' },
+                  { code: '', label: 'Hapus (Kosong)' },
+                ]
+                  .map((item) => {
+                    const isSelected = activeBrushStatus === item.code;
+                    const meta = ATT_STATUS_META[item.code];
+                    return `
+                      <button
+                        type="button"
+                        onclick="setActiveBrush('${item.code}')"
+                        class="px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition flex items-center gap-1.5 ${
+                          isSelected
+                            ? 'ring-2 ring-brand-700 ring-offset-1 border-brand-700 bg-brand-50 text-brand-900'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }"
+                      >
+                        <span class="w-4 h-4 rounded text-[9px] flex items-center justify-center border ${meta.bg}">${meta.label}</span>
+                        <span>${item.label}</span>
+                      </button>
+                    `;
+                  })
+                  .join('')}
+              </div>
+
+              <div class="flex flex-col sm:flex-row gap-2">
+                <div class="relative">
+                  <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                  <input
+                    type="text"
+                    value="${escapeHTML(workplaceSearch)}"
+                    oninput="workplaceSearch = this.value; renderWorkplaceTab();"
+                    placeholder="Cari nama / NIK..."
+                    class="w-full sm:w-48 pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none"
+                  />
+                </div>
+                <select
+                  onchange="workplaceSiteFilter = this.value; renderWorkplaceTab();"
+                  class="px-3 py-1.5 text-xs font-semibold bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none"
+                >
+                  <option value="ALL" ${workplaceSiteFilter === 'ALL' ? 'selected' : ''}>Semua Site (${appState.sites.length})</option>
+                  ${appState.sites
+                    .map(
+                      (s) =>
+                        `<option value="${s.id}" ${workplaceSiteFilter === s.id ? 'selected' : ''}>${escapeHTML(s.siteName)}</option>`
+                    )
+                    .join('')}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Render Matriks Absensi per Site -->
+          ${attendanceSitesHtml}
+        </div>
+
+        <!-- SECTION C: MASTER DATA MANPOWER AKTIF (EDIT / PINDAH SITE / RESIGN) -->
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+            <div>
+              <h2 class="text-base font-bold text-slate-900">Master Data Karyawan Aktif</h2>
+              <p class="text-xs text-slate-500 mt-0.5">Kelola profil karyawan, mutasi pindah site, skema gaji, rekening bank, atau status resign.</p>
+            </div>
+            <span class="px-3 py-1 rounded-full text-xs font-bold bg-brand-50 text-brand-800 border border-brand-200">
+              ${sortedActive.length} Karyawan
+            </span>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                  <th class="py-3 px-4">NIK & Nama Lengkap</th>
+                  <th class="py-3 px-4">Jabatan & Site Saat Ini</th>
+                  <th class="py-3 px-4">Skema & Besaran Gaji</th>
+                  <th class="py-3 px-4">Data Rekening</th>
+                  <th class="py-3 px-4 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 text-xs">
+                ${
+                  sortedActive.length === 0
+                    ? `<tr><td colspan="5" class="py-8 text-center text-slate-400">
+                        Belum ada data manpower aktif. Klik <strong>"Tambah Manpower Baru"</strong> untuk menambahkan karyawan.
+                      </td></tr>`
+                    : sortedActive
+                        .map((emp) => {
+                          const site = appState.sites.find((s) => s.id === emp.siteId);
+                          let salarySummary = '';
+                          if (emp.salaryType === 'HO Salary') {
+                            salarySummary = `<div class="font-bold text-slate-900">${formatRupiah(emp.salaryAmount)} <span class="text-[10px] font-normal text-slate-500">/ bulan</span></div>`;
+                          } else if (emp.salaryType === 'Site Salary v.1') {
+                            salarySummary = `
+                              <div class="font-bold text-slate-900">Basic: ${formatRupiah(emp.salaryAmount)}</div>
+                              <div class="text-[11px] text-brand-700 font-medium">Allow: ${formatRupiah(emp.siteAllowance)} / hari</div>
+                            `;
+                          } else {
+                            salarySummary = `<div class="font-bold text-slate-900">${formatRupiah(emp.salaryAmount)} <span class="text-[10px] font-normal text-slate-500">/ hari</span></div>`;
+                          }
+                          return `
+                            <tr class="hover:bg-slate-50/80 transition">
+                              <td class="py-3 px-4">
+                                <div class="font-bold text-slate-900">${escapeHTML(emp.name)}</div>
+                                <div class="text-[11px] text-slate-500 font-mono mt-0.5">NIK: ${escapeHTML(emp.nik)}</div>
+                                <div class="text-[11px] text-slate-400 truncate max-w-[220px]" title="${escapeHTML(emp.address)}">${escapeHTML(emp.address)}</div>
+                              </td>
+                              <td class="py-3 px-4">
+                                <div class="font-semibold text-slate-800">${escapeHTML(emp.position)}</div>
+                                <span class="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md text-[11px] font-semibold ${
+                                  site?.isHO ? 'bg-indigo-50 text-indigo-700' : 'bg-brand-50 text-brand-700'
+                                }">
+                                  <i class="fa-solid fa-location-dot text-[9px]"></i>
+                                  ${escapeHTML(site ? site.siteName : 'Belum ditentukan')}
+                                </span>
+                              </td>
+                              <td class="py-3 px-4">
+                                <div class="text-[11px] font-semibold text-brand-800">${escapeHTML(emp.salaryType)}</div>
+                                ${salarySummary}
+                              </td>
+                              <td class="py-3 px-4 text-[11px]">
+                                ${
+                                  emp.bankName || emp.bankNumber
+                                    ? `<div class="font-bold text-slate-800">${escapeHTML(emp.bankName)} - ${escapeHTML(emp.bankNumber)}</div>
+                                       <div class="text-slate-500">a.n. ${escapeHTML(emp.bankHolder || emp.name)}</div>`
+                                    : `<span class="text-slate-400 italic">Belum diisi</span>`
+                                }
+                              </td>
+                              <td class="py-3 px-4 text-right whitespace-nowrap">
+                                <div class="inline-flex items-center gap-1.5">
+                                  <button
+                                    onclick="openManpowerModal('${emp.id}')"
+                                    class="px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition"
+                                    title="Edit Data / Pindah Site / Resign"
+                                  >
+                                    <i class="fa-solid fa-user-pen"></i> Edit
+                                  </button>
+                                  <button
+                                    onclick="deleteManpower('${emp.id}')"
+                                    class="px-2.5 py-1.5 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100 transition"
+                                    title="Hapus Karyawan"
+                                  >
+                                    <i class="fa-solid fa-trash-can"></i>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          `;
+                        })
+                        .join('')
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- SECTION D: RESIGNED MANPOWER GROUP (KELOMPOK KHUSUS) -->
+        <div class="bg-white rounded-2xl border border-rose-200 shadow-xs overflow-hidden">
+          <div class="px-5 py-4 bg-rose-50/70 border-b border-rose-200 flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <div class="w-8 h-8 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center">
+                <i class="fa-solid fa-user-slash"></i>
+              </div>
+              <div>
+                <h3 class="text-sm font-bold text-rose-950">Arsip Karyawan Resign (Kelompok Khusus)</h3>
+                <p class="text-xs text-rose-700">Karyawan berstatus Resign dipisahkan otomatis dari daftar aktif dan perhitungan gaji berjalan.</p>
+              </div>
+            </div>
+            <span class="px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800">
+              ${resignedEmployees.length} Orang
+            </span>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                  <th class="py-2.5 px-4">NIK</th>
+                  <th class="py-2.5 px-4">Nama Lengkap</th>
+                  <th class="py-2.5 px-4">Jabatan Terakhir</th>
+                  <th class="py-2.5 px-4">Site Terakhir</th>
+                  <th class="py-2.5 px-4">Status</th>
+                  <th class="py-2.5 px-4 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 text-xs">
+                ${
+                  resignedEmployees.length === 0
+                    ? `<tr><td colspan="6" class="py-5 text-center text-slate-400 italic">Tidak ada data karyawan resign.</td></tr>`
+                    : resignedEmployees
+                        .map((emp) => {
+                          const site = appState.sites.find((s) => s.id === emp.siteId);
+                          return `
+                            <tr class="bg-rose-50/20 hover:bg-rose-50/40">
+                              <td class="py-3 px-4 font-mono text-slate-600">${escapeHTML(emp.nik)}</td>
+                              <td class="py-3 px-4 font-semibold text-slate-800">${escapeHTML(emp.name)}</td>
+                              <td class="py-3 px-4 text-slate-600">${escapeHTML(emp.position)}</td>
+                              <td class="py-3 px-4 text-slate-600">${escapeHTML(site ? site.siteName : '-')}</td>
+                              <td class="py-3 px-4">
+                                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-700">Resign</span>
+                              </td>
+                              <td class="py-3 px-4 text-right whitespace-nowrap">
+                                <button onclick="openManpowerModal('${emp.id}')" class="px-2.5 py-1 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 mr-1">
+                                  Edit / Aktifkan Kembali
+                                </button>
+                                <button onclick="deleteManpower('${emp.id}')" class="px-2.5 py-1 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100">
+                                  Hapus
+                                </button>
+                              </td>
+                            </tr>
+                          `;
+                        })
+                        .join('')
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    // =========================================================================
+    // 9. TAB 4: LAPORAN (REKAP GAJI BULANAN & CETAK / EKSPOR)
+    // =========================================================================
+    function renderLaporanTab() {
+      const container = document.getElementById('view-laporan');
+      const activeEmployees = appState.employees.filter((e) => e.status === 'Aktif');
+      const targetSites =
+        reportSiteFilter === 'ALL' ? appState.sites : appState.sites.filter((s) => s.id === reportSiteFilter);
+
+      const siteReportBlocks = targetSites
+        .map((site, siteIdx) => {
+          const siteEmps = sortEmployeesByHierarchy(
+            activeEmployees.filter((e) => e.siteId === site.id),
+            Boolean(site.isHO)
+          );
+
+          let subKotor = 0;
+          let subKasbon = 0;
+          let subInsentif = 0;
+          let subBersih = 0;
+
+          const rowsHtml =
+            siteEmps.length === 0
+              ? `<tr><td colspan="10" class="py-6 text-center text-slate-400 italic">Tidak ada data gaji karyawan pada lokasi ini.</td></tr>`
+              : siteEmps
+                  .map((emp, idx) => {
+                    const att = getEmployeeAttendance(emp.id);
+                    const calc = calculateEmployeePayroll(emp, att);
+                    const txType = att.txType || emp.defaultTxType || 'Transfer';
+
+                    subKotor += calc.gajiKotor;
+                    subKasbon += calc.kasbon;
+                    subInsentif += calc.insentif;
+                    subBersih += calc.gajiBersih;
+
+                    const rekeningText =
+                      emp.bankName || emp.bankNumber
+                        ? `<div class="font-semibold text-slate-800">${escapeHTML(emp.bankName)} - ${escapeHTML(emp.bankNumber)}</div>
+                           <div class="text-[10px] text-slate-500">a.n. ${escapeHTML(emp.bankHolder || emp.name)}</div>`
+                        : `<span class="text-slate-400 italic">-</span>`;
+
+                    return `
+                      <tr class="hover:bg-slate-50/80 transition">
+                        <td class="py-2.5 px-3 text-center font-semibold text-slate-500">${idx + 1}</td>
+                        <td class="py-2.5 px-3 font-bold text-slate-900">${escapeHTML(emp.name)}</td>
+                        <td class="py-2.5 px-3 text-slate-700">${escapeHTML(emp.position)}</td>
+                        <td class="py-2.5 px-3 text-center font-semibold text-slate-800">${calc.hariHadirKerja}</td>
+                        <td class="py-2.5 px-3 text-right text-slate-800">${formatRupiah(calc.gajiKotor)}</td>
+                        <td class="py-2.5 px-3 text-right text-rose-700">${formatRupiah(calc.kasbon)}</td>
+                        <td class="py-2.5 px-3 text-right text-emerald-700">${formatRupiah(calc.insentif)}</td>
+                        <td class="py-2.5 px-3 text-right font-bold text-brand-900 bg-brand-50/40">${formatRupiah(calc.gajiBersih)}</td>
+                        <td class="py-2.5 px-3 hidden print-table-col">${rekeningText}</td>
+                        <td class="py-2.5 px-3 text-center">
+                          <span class="px-2 py-0.5 rounded-md text-[11px] font-semibold ${
+                            txType === 'Transfer'
+                              ? 'bg-sky-50 text-sky-800 border border-sky-200'
+                              : 'bg-amber-50 text-amber-800 border border-amber-200'
+                          }">
+                            ${escapeHTML(txType)}
+                          </span>
+                        </td>
+                      </tr>
+                    `;
+                  })
+                  .join('');
+
+          return `
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden print-card ${
+              siteIdx > 0 ? 'page-break' : ''
+            }">
+              <!-- Kop Surat Khusus Print -->
+              <div class="hidden print-only px-6 pt-5 pb-3 border-b-2 border-slate-800">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h2 class="text-lg font-bold tracking-tight uppercase">PT. BUMI LATIMOJONG</h2>
+                    <p class="text-xs text-slate-600">Laporan Rekapitulasi Penggajian Karyawan — Periode ${formatPeriodIndo(selectedPeriod)}</p>
+                  </div>
+                  <div class="text-right text-xs">
+                    <div class="font-bold">Site: ${escapeHTML(site.siteName)}</div>
+                    <div>Klien: ${escapeHTML(site.clientName)}</div>
+                    <div>Lokasi: ${escapeHTML(site.location)}</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Header Card Layar -->
+              <div class="px-5 py-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 no-print">
+                <div>
+                  <h3 class="text-base font-bold text-slate-900">Laporan Gaji — ${escapeHTML(site.siteName)}</h3>
+                  <p class="text-xs text-slate-500">Klien: ${escapeHTML(site.clientName)} &bull; Lokasi: ${escapeHTML(site.location)}</p>
+                </div>
+                <span class="px-3 py-1 rounded-lg text-xs font-bold bg-brand-700 text-white self-start sm:self-center">
+                  Total Transfer/Cash: ${formatRupiah(subBersih)}
+                </span>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                      <th class="py-3 px-3 w-10 text-center">No</th>
+                      <th class="py-3 px-3">Nama</th>
+                      <th class="py-3 px-3">Jabatan</th>
+                      <th class="py-3 px-3 text-center">Jumlah Hari</th>
+                      <th class="py-3 px-3 text-right">Gaji Kotor</th>
+                      <th class="py-3 px-3 text-right">Kasbon</th>
+                      <th class="py-3 px-3 text-right">Insentif</th>
+                      <th class="py-3 px-3 text-right bg-brand-50/70 text-brand-900">Gaji Bersih</th>
+                      <th class="py-3 px-3 hidden print-table-col">Data Rekening</th>
+                      <th class="py-3 px-3 text-center">Jenis Transaksi</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 text-xs">
+                    ${rowsHtml}
+                  </tbody>
+                  ${
+                    siteEmps.length > 0
+                      ? `<tfoot>
+                          <tr class="bg-slate-100/80 border-t-2 border-slate-200 text-xs font-bold text-slate-900">
+                            <td colspan="4" class="py-3 px-3 text-right uppercase text-[11px]">Total ${escapeHTML(site.siteName)}</td>
+                            <td class="py-3 px-3 text-right">${formatRupiah(subKotor)}</td>
+                            <td class="py-3 px-3 text-right text-rose-700">${formatRupiah(subKasbon)}</td>
+                            <td class="py-3 px-3 text-right text-emerald-700">${formatRupiah(subInsentif)}</td>
+                            <td class="py-3 px-3 text-right text-brand-900 bg-brand-100/60">${formatRupiah(subBersih)}</td>
+                            <td class="py-3 px-3 hidden print-table-col"></td>
+                            <td class="py-3 px-3"></td>
+                          </tr>
+                        </tfoot>`
+                      : ''
+                  }
+                </table>
+              </div>
+
+              <!-- Kolom Tanda Tangan Persetujuan Khusus Print -->
+              <div class="hidden print-only px-8 py-6">
+                <div class="grid grid-cols-3 gap-8 text-center text-xs mt-4">
+                  <div>
+                    <p class="mb-14">Dibuat Oleh,</p>
+                    <p class="font-bold underline">Administrasi / HRD</p>
+                  </div>
+                  <div>
+                    <p class="mb-14">Diperiksa Oleh,</p>
+                    <p class="font-bold underline">Manajer Keuangan</p>
+                  </div>
+                  <div>
+                    <p class="mb-14">Disetujui Oleh,</p>
+                    <p class="font-bold underline">Direktur PT. Bumi Latimojong</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+
+      container.innerHTML = `
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 no-print">
+          <div>
+            <h2 class="text-base sm:text-lg font-bold text-slate-900">Laporan Penggajian Bulanan — ${formatPeriodIndo(selectedPeriod)}</h2>
+            <p class="text-xs text-slate-500 mt-0.5">
+              Kolom <strong>Data Rekening</strong> otomatis disertakan saat mencetak laporan (PDF/Print) maupun ekspor file Excel/CSV.
+            </p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2.5">
+            <select
+              onchange="reportSiteFilter = this.value; renderLaporanTab();"
+              class="px-3.5 py-2 text-xs font-semibold bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-600 outline-none"
+            >
+              <option value="ALL" ${reportSiteFilter === 'ALL' ? 'selected' : ''}>Semua Site (${appState.sites.length})</option>
+              ${appState.sites
+                .map(
+                  (s) =>
+                    `<option value="${s.id}" ${reportSiteFilter === s.id ? 'selected' : ''}>${escapeHTML(s.siteName)}</option>`
+                )
+                .join('')}
+            </select>
+
+            <button
+              onclick="exportReportCSV()"
+              class="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-brand-800 bg-brand-50 border border-brand-200 rounded-xl hover:bg-brand-100 transition"
+            >
+              <i class="fa-solid fa-file-csv"></i>
+              <span>Ekspor CSV / Excel</span>
+            </button>
+
+            <button
+              onclick="window.print()"
+              class="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-brand-700 rounded-xl hover:bg-brand-800 transition shadow-xs"
+            >
+              <i class="fa-solid fa-print"></i>
+              <span>Cetak Laporan / PDF</span>
+            </button>
+          </div>
+        </div>
+
+        ${siteReportBlocks}
+      `;
+    }
+
+    // =========================================================================
+    // 10. MODAL FORM CONTROLLERS (SITE, POSITION, MANPOWER)
+    // =========================================================================
+    function openSiteModal(siteId = null) {
+      const title = document.getElementById('modal-site-title');
+      const idInput = document.getElementById('site-id');
+      const clientInput = document.getElementById('site-client');
+      const locInput = document.getElementById('site-location');
+      const nameInput = document.getElementById('site-name');
+
+      if (siteId) {
+        const site = appState.sites.find((s) => s.id === siteId);
+        if (!site) return;
+        title.textContent = 'Edit Data Site';
+        idInput.value = site.id;
+        clientInput.value = site.clientName;
+        locInput.value = site.location;
+        nameInput.value = site.siteName;
+      } else {
+        title.textContent = 'Tambah Site Baru';
+        idInput.value = '';
+        clientInput.value = '';
+        locInput.value = '';
+        nameInput.value = '';
+      }
+      openModal('modal-site');
+    }
+
+    async function handleSaveSite(e) {
+      e.preventDefault();
+      const id = document.getElementById('site-id').value.trim();
+      const clientName = document.getElementById('site-client').value.trim();
+      const location = document.getElementById('site-location').value.trim();
+      const siteName = document.getElementById('site-name').value.trim();
+
+      if (id) {
+        const idx = appState.sites.findIndex((s) => s.id === id);
+        if (idx !== -1) {
+          appState.sites[idx] = { ...appState.sites[idx], clientName, location, siteName };
+        }
+        showToast('Data site berhasil diperbarui.');
+      } else {
+        appState.sites.push({
+          id: `site-${Date.now()}`,
+          clientName,
+          location,
+          siteName,
+          isHO: false,
+        });
+        showToast('Site baru berhasil ditambahkan.');
+      }
+
+      closeModal('modal-site');
+      renderActiveView();
+      await saveState();
+    }
+
+    function deleteSite(siteId) {
+      const assignedCount = appState.employees.filter((e) => e.siteId === siteId).length;
+      if (assignedCount > 0) {
+        showToast(`Site tidak dapat dihapus karena masih memiliki ${assignedCount} karyawan terdaftar. Pindahkan karyawan terlebih dahulu.`, 'error');
+        return;
+      }
+      const site = appState.sites.find((s) => s.id === siteId);
+      openConfirmModal(
+        'Hapus Lokasi Site',
+        `Apakah Anda yakin ingin menghapus "${site ? site.siteName : 'site ini'}"?`,
+        async () => {
+          appState.sites = appState.sites.filter((s) => s.id !== siteId);
+          renderActiveView();
+          showToast('Site berhasil dihapus.', 'info');
+          await saveState();
+        }
+      );
+    }
+
+    function openPositionModal() {
+      document.getElementById('pos-name').value = '';
+      document.getElementById('pos-category').value = 'SITE';
+      document.getElementById('pos-rank').value = '16';
+      openModal('modal-position');
+    }
+
+    async function handleSavePosition(e) {
+      e.preventDefault();
+      const name = document.getElementById('pos-name').value.trim();
+      const category = document.getElementById('pos-category').value;
+      const rank = Math.max(1, Number(document.getElementById('pos-rank').value) || 20);
+
+      const exists = appState.positions.some(
+        (p) => p.name.toLowerCase() === name.toLowerCase() && p.category === category
+      );
+      if (exists) {
+        showToast('Jabatan dengan nama dan kategori tersebut sudah ada.', 'error');
+        return;
+      }
+
+      appState.positions.push({
+        id: `pos-${Date.now()}`,
+        name,
+        category,
+        rank,
+      });
+
+      closeModal('modal-position');
+      showToast(`Jabatan "${name}" berhasil ditambahkan.`);
+      await saveState();
+    }
+
+    function populateManpowerSelects(selectedSiteId = '', selectedPos = '') {
+      const siteSelect = document.getElementById('mp-site');
+      const posSelect = document.getElementById('mp-position');
+
+      siteSelect.innerHTML = appState.sites
+        .map(
+          (s) =>
+            `<option value="${s.id}" ${s.id === selectedSiteId ? 'selected' : ''}>${escapeHTML(s.siteName)} — ${escapeHTML(s.clientName)}</option>`
+        )
+        .join('');
+
+      const sitePositions = [...appState.positions]
+        .filter((p) => p.category === 'SITE')
+        .sort((a, b) => a.rank - b.rank);
+      const hoPositions = [...appState.positions]
+        .filter((p) => p.category === 'HO')
+        .sort((a, b) => a.rank - b.rank);
+
+      posSelect.innerHTML = `
+        <optgroup label="Jabatan Site / Lapangan">
+          ${sitePositions
+            .map(
+              (p) =>
+                `<option value="${escapeHTML(p.name)}" ${p.name === selectedPos ? 'selected' : ''}>${p.rank}. ${escapeHTML(p.name)}</option>`
+            )
+            .join('')}
+        </optgroup>
+        <optgroup label="Jabatan Head Office (Kantor Pusat)">
+          ${hoPositions
+            .map(
+              (p) =>
+                `<option value="${escapeHTML(p.name)}" ${p.name === selectedPos ? 'selected' : ''}>${p.rank}. ${escapeHTML(p.name)}</option>`
+            )
+            .join('')}
+        </optgroup>
+      `;
+    }
+
+    function updateSalaryFormUI() {
+      const type = document.getElementById('mp-salary-type').value;
+      const primaryLabel = document.getElementById('mp-salary-primary-label');
+      const primaryInput = document.getElementById('mp-salary-amount');
+      const allowanceGroup = document.getElementById('mp-salary-allowance-group');
+      const allowanceInput = document.getElementById('mp-salary-allowance');
+      const hint = document.getElementById('salary-type-hint');
+
+      if (type === 'HO Salary') {
+        primaryLabel.innerHTML = 'HO Salary (Full / Bulan) (Rp) <span class="text-red-500">*</span>';
+        primaryInput.placeholder = 'Contoh: 15000000';
+        allowanceGroup.classList.add('hidden');
+        allowanceInput.required = false;
+        hint.innerHTML =
+          '<strong>HO Salary:</strong> Gaji penuh dalam satu bulan, tidak terpengaruh oleh jumlah kehadiran harian.';
+      } else if (type === 'Site Salary v.1') {
+        primaryLabel.innerHTML = 'Basic Salary (Gaji Pokok / Bulan) (Rp) <span class="text-red-500">*</span>';
+        primaryInput.placeholder = 'Contoh: 4500000';
+        allowanceGroup.classList.remove('hidden');
+        allowanceInput.required = true;
+        hint.innerHTML =
+          '<strong>Site Salary v.1:</strong> <code>Basic Salary (Bulanan) + (Site Allowance × Jumlah Hari Hadir M)</code>.';
+      } else {
+        primaryLabel.innerHTML = 'Upah Harian (Rp / Hari) <span class="text-red-500">*</span>';
+        primaryInput.placeholder = 'Contoh: 200000';
+        allowanceGroup.classList.add('hidden');
+        allowanceInput.required = false;
+        hint.innerHTML =
+          '<strong>Site Salary v.2:</strong> <code>Upah Harian × Jumlah Hari Hadir (M)</code>.';
+      }
+    }
+
+    function openManpowerModal(empId = null) {
+      const title = document.getElementById('modal-mp-title');
+      if (empId) {
+        const emp = appState.employees.find((e) => e.id === empId);
+        if (!emp) return;
+        title.textContent = 'Edit Data Karyawan (Manpower)';
+        document.getElementById('mp-id').value = emp.id;
+        document.getElementById('mp-nik').value = emp.nik;
+        document.getElementById('mp-name').value = emp.name;
+        populateManpowerSelects(emp.siteId, emp.position);
+        document.getElementById('mp-address').value = emp.address;
+        document.getElementById('mp-status').value = emp.status;
+        document.getElementById('mp-tx-type').value = emp.defaultTxType || 'Transfer';
+        document.getElementById('mp-salary-type').value = emp.salaryType || 'HO Salary';
+        document.getElementById('mp-salary-amount').value = emp.salaryAmount || 0;
+        document.getElementById('mp-salary-allowance').value = emp.siteAllowance || 0;
+        document.getElementById('mp-bank-name').value = emp.bankName || '';
+        document.getElementById('mp-bank-number').value = emp.bankNumber || '';
+        document.getElementById('mp-bank-holder').value = emp.bankHolder || '';
+      } else {
+        title.textContent = 'Tambah Karyawan Baru (Manpower)';
+        document.getElementById('mp-id').value = '';
+        document.getElementById('mp-nik').value = '';
+        document.getElementById('mp-name').value = '';
+        const defaultSite = appState.sites[0]?.id || 'site-ho';
+        populateManpowerSelects(defaultSite, 'PJO');
+        document.getElementById('mp-address').value = '';
+        document.getElementById('mp-status').value = 'Aktif';
+        document.getElementById('mp-tx-type').value = 'Transfer';
+        document.getElementById('mp-salary-type').value = 'Site Salary v.1';
+        document.getElementById('mp-salary-amount').value = '';
+        document.getElementById('mp-salary-allowance').value = '';
+        document.getElementById('mp-bank-name').value = '';
+        document.getElementById('mp-bank-number').value = '';
+        document.getElementById('mp-bank-holder').value = '';
+      }
+      updateSalaryFormUI();
+      openModal('modal-manpower');
+    }
+
+    async function handleSaveManpower(e) {
+      e.preventDefault();
+      const id = document.getElementById('mp-id').value.trim();
+      const salaryType = document.getElementById('mp-salary-type').value;
+      const payload = {
+        nik: document.getElementById('mp-nik').value.trim(),
+        name: document.getElementById('mp-name').value.trim(),
+        siteId: document.getElementById('mp-site').value,
+        position: document.getElementById('mp-position').value,
+        address: document.getElementById('mp-address').value.trim(),
+        status: document.getElementById('mp-status').value,
+        defaultTxType: document.getElementById('mp-tx-type').value,
+        salaryType,
+        salaryAmount: Math.max(0, Number(document.getElementById('mp-salary-amount').value) || 0),
+        siteAllowance:
+          salaryType === 'Site Salary v.1'
+            ? Math.max(0, Number(document.getElementById('mp-salary-allowance').value) || 0)
+            : 0,
+        bankName: document.getElementById('mp-bank-name').value.trim(),
+        bankNumber: document.getElementById('mp-bank-number').value.trim(),
+        bankHolder: document.getElementById('mp-bank-holder').value.trim(),
+      };
+
+      if (id) {
+        const idx = appState.employees.findIndex((emp) => emp.id === id);
+        if (idx !== -1) {
+          appState.employees[idx] = { ...appState.employees[idx], ...payload };
+        }
+        showToast(`Data karyawan "${payload.name}" berhasil diperbarui.`);
+      } else {
+        appState.employees.push({
+          id: `emp-${Date.now()}`,
+          ...payload,
+        });
+        showToast(`Manpower baru "${payload.name}" berhasil ditambahkan.`);
+      }
+
+      closeModal('modal-manpower');
+      renderActiveView();
+      await saveState();
+    }
+
+    function deleteManpower(empId) {
+      const emp = appState.employees.find((e) => e.id === empId);
+      openConfirmModal(
+        'Hapus Data Karyawan',
+        `Apakah Anda yakin ingin menghapus data "${emp ? emp.name : 'karyawan ini'}" secara permanen?`,
+        async () => {
+          appState.employees = appState.employees.filter((e) => e.id !== empId);
+          Object.keys(appState.attendance).forEach((period) => {
+            if (appState.attendance[period] && appState.attendance[period][empId]) {
+              delete appState.attendance[period][empId];
+            }
+          });
+          renderActiveView();
+          showToast('Data karyawan berhasil dihapus.', 'info');
+          await saveState();
+        }
+      );
+    }
+
+    // =========================================================================
+    // 11. INTERACTIVE CLICK ATTENDANCE CONTROLLERS (PER SITE & PER EMPLOYEE)
+    // =========================================================================
+    function setActiveBrush(code) {
+      activeBrushStatus = code;
+      renderWorkplaceTab();
+    }
+
+    function ensurePeriodAttendanceRecord(empId) {
+      if (!appState.attendance[selectedPeriod]) {
+        appState.attendance[selectedPeriod] = {};
+      }
+      if (!appState.attendance[selectedPeriod][empId]) {
+        appState.attendance[selectedPeriod][empId] = getEmployeeAttendance(empId, selectedPeriod);
+      }
+      if (!appState.attendance[selectedPeriod][empId].days) {
+        appState.attendance[selectedPeriod][empId].days = {};
+      }
+      return appState.attendance[selectedPeriod][empId];
+    }
+
+    function toggleDailyCell(empId, day) {
+      const rec = ensurePeriodAttendanceRecord(empId);
+      const current = rec.days[day] || '';
+      if (current === activeBrushStatus || activeBrushStatus === '') {
+        delete rec.days[day];
+      } else {
+        rec.days[day] = activeBrushStatus;
+      }
+      syncCountsFromDailyMap(rec);
+      renderWorkplaceTab();
+      scheduleSaveState();
+    }
+
+    function clearDailyCell(empId, day) {
+      const rec = ensurePeriodAttendanceRecord(empId);
+      delete rec.days[day];
+      syncCountsFromDailyMap(rec);
+      renderWorkplaceTab();
+      scheduleSaveState();
+    }
+
+    function fillEmployeeAllDays(empId, statusCode) {
+      const rec = ensurePeriodAttendanceRecord(empId);
+      const daysInMonth = getDaysInPeriod(selectedPeriod);
+      rec.days = {};
+      if (statusCode) {
+        for (let d = 1; d <= daysInMonth; d++) {
+          rec.days[d] = statusCode;
+        }
+      }
+      syncCountsFromDailyMap(rec);
+      renderWorkplaceTab();
+      scheduleSaveState();
+    }
+
+    function bulkFillSiteAttendance(siteId, statusCode) {
+      const siteEmps = appState.employees.filter((e) => e.status === 'Aktif' && e.siteId === siteId);
+      const daysInMonth = getDaysInPeriod(selectedPeriod);
+      siteEmps.forEach((emp) => {
+        const rec = ensurePeriodAttendanceRecord(emp.id);
+        rec.days = {};
+        for (let d = 1; d <= daysInMonth; d++) {
+          rec.days[d] = statusCode;
+        }
+        syncCountsFromDailyMap(rec);
+      });
+      renderWorkplaceTab();
+      showToast(`Seluruh karyawan pada site ditandai Hadir (${statusCode}) untuk bulan ini.`);
+      scheduleSaveState();
+    }
+
+    function updateInlinePayrollField(empId, field, rawVal) {
+      const rec = ensurePeriodAttendanceRecord(empId);
+      if (field === 'txType') {
+        rec.txType = rawVal;
+      } else {
+        rec[field] = Math.max(0, Number(rawVal) || 0);
+      }
+      scheduleSaveState();
+    }
+
+    // =========================================================================
+    // 12. CSV EXPORT & JSON BACKUP / RESTORE
+    // =========================================================================
+    function exportReportCSV() {
+      const activeEmployees = appState.employees.filter((e) => e.status === 'Aktif');
+      const targetSites =
+        reportSiteFilter === 'ALL' ? appState.sites : appState.sites.filter((s) => s.id === reportSiteFilter);
+
+      const headers = [
+        'Site',
+        'Klien',
+        'No',
+        'Nama',
+        'Jabatan',
+        'Skema Gaji',
+        'Jumlah Hari',
+        'Gaji Kotor',
+        'Kasbon',
+        'Insentif',
+        'Gaji Bersih',
+        'Nama Bank',
+        'Nomor Rekening',
+        'Nama Pemilik Rekening',
+        'Jenis Transaksi',
+      ];
+
+      const rows = [headers.join(',')];
+
+      targetSites.forEach((site) => {
+        const siteEmps = sortEmployeesByHierarchy(
+          activeEmployees.filter((e) => e.siteId === site.id),
+          Boolean(site.isHO)
+        );
+
+        siteEmps.forEach((emp, idx) => {
+          const att = getEmployeeAttendance(emp.id);
+          const calc = calculateEmployeePayroll(emp, att);
+          const txType = att.txType || emp.defaultTxType || 'Transfer';
+
+          const cols = [
+            `"${site.siteName.replace(/"/g, '""')}"`,
+            `"${site.clientName.replace(/"/g, '""')}"`,
+            idx + 1,
+            `"${emp.name.replace(/"/g, '""')}"`,
+            `"${emp.position.replace(/"/g, '""')}"`,
+            `"${emp.salaryType}"`,
+            calc.hariHadirKerja,
+            calc.gajiKotor,
+            calc.kasbon,
+            calc.insentif,
+            calc.gajiBersih,
+            `"${(emp.bankName || '').replace(/"/g, '""')}"`,
+            `"${(emp.bankNumber || '').replace(/"/g, '""')}"`,
+            `"${(emp.bankHolder || emp.name || '').replace(/"/g, '""')}"`,
+            `"${txType}"`,
+          ];
+          rows.push(cols.join(','));
+        });
+      });
+
+      const csvContent = '\uFEFF' + rows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Laporan_Gaji_PT_Bumi_Latimojong_${selectedPeriod}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast('File CSV Laporan Gaji berhasil diunduh.');
+    }
+
+    function openBackupModal() {
+      const urlInput = document.getElementById('sb-url-input');
+      const keyInput = document.getElementById('sb-key-input');
+      if (urlInput) urlInput.value = supabaseConfig.url || '';
+      if (keyInput) keyInput.value = supabaseConfig.anonKey || '';
+      openModal('modal-backup');
+    }
+
+    function exportJSONBackup() {
+      const blob = new Blob([JSON.stringify(appState, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Backup_HRIS_PT_Bumi_Latimojong_${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast('Backup JSON berhasil diunduh.');
+    }
+
+    function importJSONBackup(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const parsed = JSON.parse(e.target.result);
+          if (!parsed.sites || !parsed.employees || !parsed.positions) {
+            throw new Error('Format JSON tidak valid');
+          }
+          appState = parsed;
+          migrateLegacySalarySchema(appState);
+          closeModal('modal-backup');
+          renderActiveView();
+          showToast('Data berhasil di-restore & disinkronkan ke Supabase!');
+          await saveState();
+        } catch (err) {
+          showToast('Gagal membaca file backup JSON. Pastikan format valid.', 'error');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function confirmClearAllData() {
+      closeModal('modal-backup');
+      openConfirmModal(
+        'Kosongkan Seluruh Data di Supabase',
+        'Semua data Site Proyek, Manpower, dan riwayat Absensi di Supabase akan dihapus permanen menjadi kosong. Lanjutkan?',
+        async () => {
+          appState = createEmptyMasterState();
+          renderActiveView();
+          showToast('Seluruh data di Supabase telah dikosongkan.', 'info');
+          await saveState();
+        }
+      );
+    }
+
+    // =========================================================================
+    // 13. INITIALIZATION
+    // =========================================================================
+    window.addEventListener('DOMContentLoaded', () => {
+      const periodInput = document.getElementById('global-period');
+      periodInput.value = selectedPeriod;
+      periodInput.addEventListener('change', (e) => {
+        if (e.target.value) {
+          selectedPeriod = e.target.value;
+          renderActiveView();
+          showToast(`Menampilkan periode ${formatPeriodIndo(selectedPeriod)}`, 'info');
+        }
+      });
+
+      switchTab('workplace');
+      initSupabase();
+    });
+  </script>
+</body>
+</html>
